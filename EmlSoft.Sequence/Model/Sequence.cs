@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace EmlSoft.Sequence.Model
@@ -10,20 +11,23 @@ namespace EmlSoft.Sequence.Model
 	public class Sequence : IDisposable, ISequence
 	{
 		private ISequenceModel _context;
-		private static object _locker = new object();
-		private int _curent;
+		private static object _dictMutex = new Object();
+
+		private static Dictionary<string, object> _locker = new Dictionary<string, object>();
+		private static Dictionary<string, int> _curent = new Dictionary<string, int>();
 		private int _id;
 		private string _template;
+		private string _name;
 
 		/// <summary>
 		/// Класс счетчик непосредственно
 		/// </summary>
 		/// <param name="context"></param>
-		public Sequence(ISequenceModel context, string template, int id, int curent)
+		public Sequence(ISequenceModel context, string name, string template, int id)
 		{
 			_id = id;
-			_curent = curent;
 			_template = template;
+			_name = name ?? throw new ArgumentNullException(nameof(name));
 			_context = context ?? throw new ArgumentNullException( nameof(context));
 		}
 
@@ -84,7 +88,7 @@ namespace EmlSoft.Sequence.Model
 					string temp1 = string.Empty.PadRight(length - 2, '0');
 					if (verb.Value.Substring(1, length - 2) == temp1)
 					{
-						ret = ret.Replace(verb.ToString(), _curent.ToString(temp1));
+						ret = ret.Replace(verb.ToString(), Current.ToString(temp1));
 						continue;
 					}
 				}
@@ -94,10 +98,32 @@ namespace EmlSoft.Sequence.Model
 			return ret;
 		}
 
+		private int GetCurent()
+		{
+			if (_curent.TryGetValue(_name, out int ret))
+				return ret;
+
+			lock ( _dictMutex )
+			{
+				var db = _context.Set<Data.Sequence>().AsNoTracking().First(x => x.Id == _id);
+				_curent.Add(_name, db.CurrentValue);
+				return db.CurrentValue;
+			}
+		}
+
+		private void SetCurent(int Value)
+		{
+			lock (_dictMutex)
+			{
+				_curent[_name] = Value;
+			}
+		}
+
 		public int Current
 		{
-			get => _curent;
-			private set { _curent = value; }
+			get => GetCurent();
+
+			private set => SetCurent(value);
 		}
 
 		public string CurrentValue()
@@ -111,10 +137,20 @@ namespace EmlSoft.Sequence.Model
 		{
 			CheckDispose();
 
-			lock(_locker)
+			object lockObject = null;
+			lock(_dictMutex)
+			{				
+				if (!_locker.TryGetValue(_name, out lockObject))
+				{
+					lockObject = new Mutex();
+					_locker.Add(_name, lockObject);
+				}
+			}
+
+			lock (lockObject)
 			{
 				var dat = _context.Set<Data.Sequence>().First(x => x.Id == _id);
-				int NextVal = dat.CurrentValue + dat.Increment;
+				int NextVal = Current + dat.Increment;
 				if (dat.MaxValue != null)
 				{
 					if (NextVal > dat.MaxValue)
@@ -122,13 +158,12 @@ namespace EmlSoft.Sequence.Model
 						if (!dat.Cycling)
 							throw new Exception("Max value");
 
-						NextVal = dat.MinValue + NextVal - ( dat.MaxValue ?? 0) - 1;
+						NextVal = dat.MinValue + NextVal - (dat.MaxValue ?? 0) - 1;
 					}
 				}
 
 				dat.CurrentValue = NextVal;
 				_context.SaveChanges();
-
 				Current = NextVal;
 			}
 

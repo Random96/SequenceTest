@@ -33,7 +33,7 @@ namespace EmlSoft.Sequence
 				return null;
 
 			// in real project - we shud use AutoMapper
-			return new Model.Sequence(_context, ret.Template, ret.Id, ret.CurrentValue);
+			return new Model.Sequence(_context, ret.Name, ret.Template, ret.Id);
 		}
 
 		public ISequence CreateRepository(string sequenceName, string template, int minValue, int? maxValue, int increment, bool isCicling)
@@ -53,7 +53,7 @@ namespace EmlSoft.Sequence
 			_context.SaveChanges();
 
 			// in real project - we shud use AutoMapper
-			return new Model.Sequence(_context, dat.Template, dat.Id, dat.CurrentValue);
+			return new Model.Sequence(_context, dat.Name, dat.Template, dat.Id);
 		}
 
 		#region IDisposable Support
